@@ -1,0 +1,123 @@
+name: IPA Pipeline (Multi-Repo)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "ipa_sources/**"
+      - "scripts/**"
+      - "ipa_repos.yml"
+      - ".github/workflows/ipa-pipeline.yml"
+  workflow_dispatch: {}
+
+jobs:
+  fetch-and-process-ipas:
+    name: Fetch IPAs from repos and process
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install PyYAML
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Load IPA repo config and clone repos
+        run: |
+          mkdir -p ipa_sources
+          python3 << 'EOF'
+          import yaml, subprocess, os, pathlib
+
+          cfg_path = pathlib.Path("ipa_repos.yml")
+          if not cfg_path.exists():
+              print("No ipa_repos.yml found, skipping external repos.")
+              raise SystemExit(0)
+
+          with open(cfg_path, "r") as f:
+              cfg = yaml.safe_load(f)
+
+          repos = cfg.get("repos", [])
+          if not repos:
+              print("No repos defined in ipa_repos.yml")
+              raise SystemExit(0)
+
+          os.makedirs("ipa_sources", exist_ok=True)
+
+          for repo in repos:
+              name = repo["name"]
+              url = repo["url"]
+              path = repo["path"]
+
+              print(f"Cloning {name} from {url}")
+              subprocess.run(["git", "clone", "--depth", "1", url, name], check=True)
+
+              src_dir = pathlib.Path(name) / path
+              if not src_dir.exists():
+                  print(f"  ⚠ Path {src_dir} not found in {name}, skipping.")
+                  continue
+
+              for ipa in src_dir.glob("*.ipa"):
+                  dest = pathlib.Path("ipa_sources") / ipa.name
+                  print(f"  ✓ Found IPA {ipa}, copying to {dest}")
+                  dest.write_bytes(ipa.read_bytes())
+          EOF
+
+      - name: Find IPA Sources
+        id: find_ipas
+        run: |
+          IPAS=$(ls ipa_sources/*.ipa 2>/dev/null || true)
+          if [ -z "$IPAS" ]; then
+            echo "No IPAs found in ipa_sources/"
+            exit 0
+          fi
+          echo "ipas=$IPAS" >> $GITHUB_OUTPUT
+
+      - name: Process Each IPA
+        run: |
+          mkdir -p processed
+          for IPA in ${{ steps.find_ipas.outputs.ipas }}; do
+            NAME=$(basename "$IPA")
+            echo "Processing $NAME"
+
+            mkdir work
+            unzip -q "$IPA" -d work
+
+            ENT="work/Payload/Fearn.app/Entitlements.plist"
+            cat > "$ENT" << 'EOF'
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>get-task-allow</key><true/>
+                <key>com.apple.security.cs.allow-jit</key><true/>
+                <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+                <key>com.apple.security.cs.disable-library-validation</key><true/>
+                <key>com.apple.security.cs.allow-dyld-environment-variables</key><true/>
+                <key>com.apple.developer.networking.multicast</key><true/>
+                <key>com.apple.developer.networking.wifi-info</key><true/>
+            </dict>
+            </plist>
+            EOF
+
+            python3 scripts/generate_coderesources.py
+
+            cd work
+            zip -qr "../processed/patched-$NAME" Payload iTunesMetadata.plist
+            cd ..
+
+            rm -rf work
+            echo "✓ Patched $NAME"
+          done
+
+      - name: Upload Patched IPAs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Patched-IPAs
+          path: processed/
