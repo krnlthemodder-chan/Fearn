@@ -18,6 +18,7 @@ jobs:
       ENABLE_AI_FEATURES: "true"
       ENABLE_GEODE_INTEGRATION: "true"
       ENABLE_SIDESTORE_SUPPORT: "true"
+      MD_APPLE_SDK_ROOT: "/Applications/Xcode_26.6.app"
 
     steps:
       - name: Checkout repository
@@ -28,11 +29,10 @@ jobs:
         with:
           xcode-version: latest
 
-      - name: Install dependencies
+      - name: Install dependencies (SwiftLint only)
         run: |
           brew update
           brew install swiftlint
-          pod install
 
       - name: Build Fearn (Release)
         run: |
