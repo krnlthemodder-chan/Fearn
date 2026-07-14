@@ -71,7 +71,7 @@ The compiled Mach-O binary:
 ## Standard Directory Structure
 
 ```
-MyApp.app/
+Fearn.app/
 ├── Info.plist                          - App configuration
 ├── PkgInfo                             - Package identifier
 ├── MyApp                               - Executable binary
