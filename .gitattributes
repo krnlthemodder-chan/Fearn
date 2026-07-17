@@ -1,0 +1,7 @@
+# Force Xcode file types to show up or classify helper tools as documentation/vendor
+fearn_*.py linguist-vendored
+copilot-auto-agent.js linguist-vendored
+src/agent/**/*.ts linguist-vendored
+
+# Explicitly ensure Swift files are indexed prominently
+*.swift linguist-detectable=true
